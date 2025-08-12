@@ -4,7 +4,6 @@ import os
 from dataclasses import dataclass
 from typing import Optional, Tuple, List
 
-import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
@@ -150,7 +149,7 @@ def select_sarimax_model(
 
     if best_spec is None:
         # Fallback to a simple specification
-        best_spec = ModelSpec(order=(1, 1, 1), seasonal_order=(0, 1, 1, seasonal_period), aic=np.inf)
+        best_spec = ModelSpec(order=(1, 1, 1), seasonal_order=(0, 1, 1, seasonal_period), aic=float("inf"))
     return best_spec
 
 
@@ -166,12 +165,12 @@ def fit_sarimax(series: pd.Series, order: Tuple[int, int, int], seasonal_order: 
     return model.fit(disp=False)
 
 
-def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Tuple[float, float, float]:
+def compute_metrics(y_true: pd.Series, y_pred: pd.Series) -> Tuple[float, float, float]:
     residuals = y_true - y_pred
-    mae = float(np.mean(np.abs(residuals)))
-    rmse = float(np.sqrt(np.mean(residuals ** 2)))
+    mae = float(residuals.abs().mean())
+    rmse = float((residuals.pow(2).mean()) ** 0.5)
     eps = 1e-8
-    mape = float(np.mean(np.abs(residuals) / (np.abs(y_true) + eps)) * 100.0)
+    mape = float((residuals.abs() / (y_true.abs() + eps)).mean() * 100.0)
     return mae, rmse, mape
 
 
@@ -204,9 +203,9 @@ def plot_all(
 
     # 2) Predictions scatter (y_true vs y_pred)
     plt.figure(figsize=(6, 6))
-    plt.scatter(test.values, predictions.values, alpha=0.7, color="#2ca02c")
-    min_val = float(np.min([test.values.min(), predictions.values.min()]))
-    max_val = float(np.max([test.values.max(), predictions.values.max()]))
+    plt.scatter(test, predictions, alpha=0.7, color="#2ca02c")
+    min_val = float(min(test.min(), predictions.min()))
+    max_val = float(max(test.max(), predictions.max()))
     plt.plot([min_val, max_val], [min_val, max_val], color="black", linestyle="--", linewidth=1)
     plt.title("Predictions vs Actuals (Test)")
     plt.xlabel("Actual")
@@ -216,7 +215,7 @@ def plot_all(
 
     # 3) Residuals scatter over time
     plt.figure(figsize=(12, 4))
-    plt.scatter(residuals.index, residuals.values, alpha=0.7, color="#ff7f0e", s=12)
+    plt.scatter(residuals.index, residuals, alpha=0.7, color="#ff7f0e", s=12)
     plt.axhline(0.0, color="black", linewidth=1)
     plt.title("Residuals Over Time (Test)")
     plt.xlabel("Date")
@@ -226,7 +225,7 @@ def plot_all(
 
     # 4) Residuals boxplot
     plt.figure(figsize=(6, 4))
-    sns.boxplot(x=residuals.values, color="#9467bd")
+    sns.boxplot(x=residuals, color="#9467bd")
     plt.title("Residuals Boxplot (Test)")
     plt.xlabel("Residual")
     plt.tight_layout()
@@ -234,7 +233,7 @@ def plot_all(
 
     # 5) Residuals histogram
     plt.figure(figsize=(8, 4))
-    sns.histplot(residuals.values, bins=30, kde=True, color="#8c564b")
+    sns.histplot(residuals, bins=30, kde=True, color="#8c564b")
     plt.title("Residuals Histogram (Test)")
     plt.xlabel("Residual")
     plt.ylabel("Frequency")
@@ -299,10 +298,10 @@ def main():
     forecast.index = test.index
 
     # Metrics
-    mae, rmse, mape = compute_metrics(test.values, forecast.values)
+    mae, rmse, mape = compute_metrics(test, forecast)
 
     # Residuals
-    residuals = pd.Series(test.values - forecast.values, index=test.index, name="Residuals")
+    residuals = (test - forecast).rename("Residuals")
 
     # Save predictions CSV
     preds_df = pd.DataFrame({
