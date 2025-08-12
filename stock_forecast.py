@@ -9,6 +9,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
+import numpy as np
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.seasonal import STL
 
@@ -149,7 +150,7 @@ def select_sarimax_model(
 
     if best_spec is None:
         # Fallback to a simple specification
-        best_spec = ModelSpec(order=(1, 1, 1), seasonal_order=(0, 1, 1, seasonal_period), aic=float("inf"))
+        best_spec = ModelSpec(order=(1, 1, 1), seasonal_order=(0, 1, 1, seasonal_period), aic=np.inf)
     return best_spec
 
 
@@ -165,12 +166,12 @@ def fit_sarimax(series: pd.Series, order: Tuple[int, int, int], seasonal_order: 
     return model.fit(disp=False)
 
 
-def compute_metrics(y_true: pd.Series, y_pred: pd.Series) -> Tuple[float, float, float]:
+def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Tuple[float, float, float]:
     residuals = y_true - y_pred
-    mae = float(residuals.abs().mean())
-    rmse = float((residuals.pow(2).mean()) ** 0.5)
+    mae = float(np.mean(np.abs(residuals)))
+    rmse = float(np.sqrt(np.mean(residuals ** 2)))
     eps = 1e-8
-    mape = float((residuals.abs() / (y_true.abs() + eps)).mean() * 100.0)
+    mape = float(np.mean(np.abs(residuals) / (np.abs(y_true) + eps)) * 100.0)
     return mae, rmse, mape
 
 
@@ -203,9 +204,9 @@ def plot_all(
 
     # 2) Predictions scatter (y_true vs y_pred)
     plt.figure(figsize=(6, 6))
-    plt.scatter(test, predictions, alpha=0.7, color="#2ca02c")
-    min_val = float(min(test.min(), predictions.min()))
-    max_val = float(max(test.max(), predictions.max()))
+    plt.scatter(test.values, predictions.values, alpha=0.7, color="#2ca02c")
+    min_val = float(np.min([test.values.min(), predictions.values.min()]))
+    max_val = float(np.max([test.values.max(), predictions.values.max()]))
     plt.plot([min_val, max_val], [min_val, max_val], color="black", linestyle="--", linewidth=1)
     plt.title("Predictions vs Actuals (Test)")
     plt.xlabel("Actual")
@@ -298,7 +299,7 @@ def main():
     forecast.index = test.index
 
     # Metrics
-    mae, rmse, mape = compute_metrics(test, forecast)
+    mae, rmse, mape = compute_metrics(test.values, forecast.values)
 
     # Residuals
     residuals = (test - forecast).rename("Residuals")
