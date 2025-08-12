@@ -67,9 +67,13 @@ def infer_seasonal_period(series: pd.Series, user_period: Optional[int]) -> int:
 
 
 def time_train_test_split(series: pd.Series, test_size: float) -> Tuple[pd.Series, pd.Series]:
-    if not (0.05 <= test_size <= 0.5):
-        raise ValueError("test_size should be between 0.05 and 0.5 for sensible evaluation")
-    split_index = int(len(series) * (1 - test_size))
+    if not (0.01 <= test_size <= 0.9):
+        raise ValueError("test_size should be between 0.01 and 0.9")
+    if len(series) < 2:
+        # Degenerate case: cannot split, put all in train and empty test
+        return series, series.iloc[0:0]
+    raw_split = int(len(series) * (1 - test_size))
+    split_index = max(1, min(len(series) - 1, raw_split))
     train, test = series.iloc[:split_index], series.iloc[split_index:]
     return train, test
 
@@ -167,6 +171,8 @@ def fit_sarimax(series: pd.Series, order: Tuple[int, int, int], seasonal_order: 
 
 
 def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Tuple[float, float, float]:
+    if y_true.size == 0 or y_pred.size == 0:
+        return float("nan"), float("nan"), float("nan")
     residuals = y_true - y_pred
     mae = float(np.mean(np.abs(residuals)))
     rmse = float(np.sqrt(np.mean(residuals ** 2)))
@@ -190,11 +196,23 @@ def plot_all(
 ):
     sns.set(style="whitegrid")
 
+    # Clean for plotting
+    preds_aligned = predictions.copy()
+    if not preds_aligned.index.equals(test.index):
+        preds_aligned = preds_aligned.reindex(test.index)
+    mask = (~test.isna()) & (~preds_aligned.isna())
+    test_clean = test[mask]
+    preds_clean = preds_aligned[mask]
+    residuals_clean = residuals.dropna()
+
     # 1) Time series line plot with forecast
     plt.figure(figsize=(12, 5))
-    plt.plot(series.index, series.values, label="Actual (All)", color="#1f77b4", alpha=0.6)
-    plt.plot(test.index, predictions.values, label="Forecast (Test)", color="#d62728")
-    plt.axvline(train.index[-1], color="gray", linestyle="--", alpha=0.8, label="Train/Test Split")
+    if len(series) > 0:
+        plt.plot(series.index, series.values, label="Actual (All)", color="#1f77b4", alpha=0.6)
+    if len(preds_clean) > 0:
+        plt.plot(preds_clean.index, preds_clean.values, label="Forecast (Test)", color="#d62728")
+    if len(train) > 0 and len(test) > 0:
+        plt.axvline(train.index[-1], color="gray", linestyle="--", alpha=0.8, label="Train/Test Split")
     plt.title("Time Series and Forecast")
     plt.xlabel("Date")
     plt.ylabel(series.name)
@@ -203,45 +221,48 @@ def plot_all(
     plt.savefig(os.path.join(output_dir, "time_series_forecast.png"), dpi=150)
 
     # 2) Predictions scatter (y_true vs y_pred)
-    plt.figure(figsize=(6, 6))
-    plt.scatter(test.values, predictions.values, alpha=0.7, color="#2ca02c")
-    min_val = float(np.min([test.values.min(), predictions.values.min()]))
-    max_val = float(np.max([test.values.max(), predictions.values.max()]))
-    plt.plot([min_val, max_val], [min_val, max_val], color="black", linestyle="--", linewidth=1)
-    plt.title("Predictions vs Actuals (Test)")
-    plt.xlabel("Actual")
-    plt.ylabel("Predicted")
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "predictions_scatter.png"), dpi=150)
+    if len(test_clean) > 0 and len(preds_clean) > 0:
+        plt.figure(figsize=(6, 6))
+        plt.scatter(test_clean.values, preds_clean.values, alpha=0.7, color="#2ca02c")
+        min_val = float(np.min([test_clean.values.min(), preds_clean.values.min()]))
+        max_val = float(np.max([test_clean.values.max(), preds_clean.values.max()]))
+        plt.plot([min_val, max_val], [min_val, max_val], color="black", linestyle="--", linewidth=1)
+        plt.title("Predictions vs Actuals (Test)")
+        plt.xlabel("Actual")
+        plt.ylabel("Predicted")
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, "predictions_scatter.png"), dpi=150)
 
     # 3) Residuals scatter over time
-    plt.figure(figsize=(12, 4))
-    plt.scatter(residuals.index, residuals, alpha=0.7, color="#ff7f0e", s=12)
-    plt.axhline(0.0, color="black", linewidth=1)
-    plt.title("Residuals Over Time (Test)")
-    plt.xlabel("Date")
-    plt.ylabel("Residual")
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "residuals_scatter.png"), dpi=150)
+    if len(residuals_clean) > 0:
+        plt.figure(figsize=(12, 4))
+        plt.scatter(residuals_clean.index, residuals_clean.values, alpha=0.7, color="#ff7f0e", s=12)
+        plt.axhline(0.0, color="black", linewidth=1)
+        plt.title("Residuals Over Time (Test)")
+        plt.xlabel("Date")
+        plt.ylabel("Residual")
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, "residuals_scatter.png"), dpi=150)
 
-    # 4) Residuals boxplot
-    plt.figure(figsize=(6, 4))
-    sns.boxplot(x=residuals, color="#9467bd")
-    plt.title("Residuals Boxplot (Test)")
-    plt.xlabel("Residual")
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "residuals_boxplot.png"), dpi=150)
+    # 4) Residuals boxplot (use matplotlib directly for robustness)
+    if len(residuals_clean) > 0:
+        plt.figure(figsize=(6, 4))
+        plt.boxplot(residuals_clean.values, vert=False)
+        plt.title("Residuals Boxplot (Test)")
+        plt.xlabel("Residual")
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, "residuals_boxplot.png"), dpi=150)
 
     # 5) Residuals histogram
-    plt.figure(figsize=(8, 4))
-    sns.histplot(residuals, bins=30, kde=True, color="#8c564b")
-    plt.title("Residuals Histogram (Test)")
-    plt.xlabel("Residual")
-    plt.ylabel("Frequency")
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "residuals_histogram.png"), dpi=150)
+    if len(residuals_clean) > 0:
+        plt.figure(figsize=(8, 4))
+        sns.histplot(residuals_clean.values, bins=30, kde=True, color="#8c564b")
+        plt.title("Residuals Histogram (Test)")
+        plt.xlabel("Residual")
+        plt.ylabel("Frequency")
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, "residuals_histogram.png"), dpi=150)
 
-    # Optionally show plots when run interactively
     try:
         plt.show()
     except Exception:
@@ -250,6 +271,10 @@ def plot_all(
 
 def seasonal_decomposition_plot(series: pd.Series, seasonal_period: int, output_dir: str):
     try:
+        if seasonal_period is None or seasonal_period < 2:
+            return
+        if len(series) < 2 * seasonal_period:
+            return
         stl = STL(series, period=seasonal_period, robust=True)
         res = stl.fit()
         fig = res.plot()
@@ -258,7 +283,6 @@ def seasonal_decomposition_plot(series: pd.Series, seasonal_period: int, output_
         fig.tight_layout()
         fig.savefig(os.path.join(output_dir, "stl_decomposition.png"), dpi=150)
     except Exception:
-        # Decomposition is optional; ignore failures silently
         pass
 
 
@@ -283,40 +307,33 @@ def main():
 
     seasonal_period = infer_seasonal_period(series, args.seasonal_period if args.seasonal_period > 0 else None)
 
-    # STL decomposition for temporal/seasonal insight
     output_dir = ensure_output_dir(args.output_dir)
     seasonal_decomposition_plot(series, seasonal_period, output_dir)
 
-    # Train/test split
     train, test = time_train_test_split(series, args.test_size)
 
-    # Model selection on train
     best_spec = select_sarimax_model(train, seasonal_period=seasonal_period)
 
-    # Fit on train, forecast test horizon
     model_fit = fit_sarimax(train, order=best_spec.order, seasonal_order=best_spec.seasonal_order)
-    forecast = model_fit.forecast(steps=len(test))
-    forecast.index = test.index
+    steps = len(test)
+    forecast = model_fit.forecast(steps=steps) if steps > 0 else pd.Series([], dtype=float)
+    if steps > 0:
+        forecast.index = test.index
 
-    # Metrics
-    mae, rmse, mape = compute_metrics(test.values, forecast.values)
+    mae, rmse, mape = compute_metrics(test.values, forecast.values if steps > 0 else np.array([]))
 
-    # Residuals
-    residuals = (test - forecast).rename("Residuals")
+    residuals = (test - forecast).rename("Residuals") if steps > 0 else pd.Series([], dtype=float, name="Residuals")
 
-    # Save predictions CSV
     preds_df = pd.DataFrame({
-        "date": test.index,
-        "actual": test.values,
-        "predicted": forecast.values,
-        "residual": residuals.values,
+        "date": test.index if steps > 0 else pd.Index([]),
+        "actual": test.values if steps > 0 else [],
+        "predicted": forecast.values if steps > 0 else [],
+        "residual": residuals.values if steps > 0 else [],
     })
     preds_df.to_csv(os.path.join(output_dir, "predictions.csv"), index=False)
 
-    # Plots
     plot_all(output_dir, series, train, test, forecast, residuals)
 
-    # Print summary info
     print("\n=== Model & Evaluation ===")
     print(f"Best order: {best_spec.order}")
     print(f"Best seasonal_order: {best_spec.seasonal_order}")
