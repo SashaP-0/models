@@ -1,0 +1,8 @@
+# Optional data sources (install if you plan to use)
+alpha_vantage>=3.0.0
+nasdaq-data-link>=1.0.4
+pandasdmx>=1.8.0
+
+# Optional Bayesian SV
+pymc>=5.10
+arviz>=0.16
