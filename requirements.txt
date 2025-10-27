@@ -1,0 +1,5 @@
+turintech-evoml-client
+fredapi
+pandas
+matplotlib
+python-dotenv
